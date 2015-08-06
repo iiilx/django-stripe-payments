@@ -22,7 +22,8 @@ class TestCustomer(TestCase):
             stripe_id="cus_xxxxxxxxxxxxxxx",
             card_fingerprint="YYYYYYYY",
             card_last_4="2342",
-            card_kind="Visa"
+            card_kind="Visa",
+            client_id="corp",
         )
 
     @patch("stripe.Customer.retrieve")
@@ -33,7 +34,7 @@ class TestCustomer(TestCase):
         stripe_customer.active_card = None
         stripe_customer.subscription = None
         stripe_customer.id = "cus_YYYYYYYYYYYYY"
-        customer = Customer.create(self.user)
+        customer = Customer.create(self.user, client_id=self.customer.client_id)
         self.assertEqual(customer.user, self.user)
         self.assertEqual(customer.stripe_id, "cus_YYYYYYYYYYYYY")
         _, kwargs = CreateMock.call_args
@@ -62,7 +63,7 @@ class TestCustomer(TestCase):
         stripe_customer.subscription.trial_start = 1348876800
         stripe_customer.subscription.trial_end = 1349876800
         stripe_customer.id = "cus_YYYYYYYYYYYYY"
-        customer = Customer.create(self.user, card="token232323", plan="pro")
+        customer = Customer.create(self.user, card="token232323", plan="pro", client_id='corp')
         self.assertEqual(customer.user, self.user)
         self.assertEqual(customer.stripe_id, "cus_YYYYYYYYYYYYY")
         _, kwargs = CreateMock.call_args
@@ -315,7 +316,8 @@ class TestCustomer(TestCase):
             paid=True,
             refunded=False,
             fee=decimal.Decimal("4.99"),
-            disputed=False
+            disputed=False,
+            client_id='corp'
         )
         RetrieveMock.return_value.refund.return_value = {
             "id": "ch_XXXXXX",
@@ -441,7 +443,8 @@ class TestCustomer(TestCase):
             refunded=False,
             captured=True,
             fee=decimal.Decimal("4.99"),
-            disputed=False
+            disputed=False,
+            client_id='corp'
         )
         RetrieveMock.return_value.refund.return_value = {
             "id": "ch_XXXXXX",

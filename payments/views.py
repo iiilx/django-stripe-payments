@@ -2,7 +2,6 @@ import json
 
 from django.conf import settings
 from django.core.urlresolvers import reverse
-from django.core.exceptions import ObjectDoesNotExist
 from django.http import HttpResponse
 from django.template import RequestContext
 from django.template.loader import render_to_string
@@ -15,7 +14,7 @@ from django.contrib.auth.decorators import login_required
 import stripe
 
 from . import settings as app_settings
-from .forms import PlanForm
+from .forms import get_plan_form
 from .models import (
     Customer,
     CurrentSubscription,
@@ -28,10 +27,15 @@ class PaymentsContextMixin(object):
 
     def get_context_data(self, **kwargs):
         context = super(PaymentsContextMixin, self).get_context_data(**kwargs)
+        client_id = None
+        if hasattr(self, 'request'):
+            client_id = getattr(self.request, 'client_id', None)
+        if client_id is None:
+            client_id = settings.STRIPE_CLIENT_ID_FUNCTION(getattr(self, 'request', None))
         context.update({
-            "STRIPE_PUBLIC_KEY": app_settings.STRIPE_PUBLIC_KEY,
-            "PLAN_CHOICES": app_settings.PLAN_CHOICES,
-            "PAYMENT_PLANS": app_settings.PAYMENTS_PLANS
+            "STRIPE_PUBLIC_KEY": app_settings.STRIPE_PUBLIC_KEYS[client_id],
+            "PLAN_CHOICES": app_settings.PLAN_CHOICES[client_id],
+            "PAYMENT_PLANS": app_settings.PAYMENTS_PLANS[client_id]
         })
         return context
 
@@ -54,7 +58,7 @@ class SubscribeView(PaymentsContextMixin, TemplateView):
     def get_context_data(self, **kwargs):
         context = super(SubscribeView, self).get_context_data(**kwargs)
         context.update({
-            "form": PlanForm
+            "form": get_plan_form(self.request)
         })
         return context
 
@@ -79,7 +83,7 @@ class HistoryView(PaymentsContextMixin, TemplateView):
 @login_required
 def change_card(request):
     try:
-        customer = request.user.customer
+        customer = request.customer
         send_invoice = customer.card_fingerprint == ""
         customer.update_card(
             request.POST.get("stripe_token")
@@ -96,20 +100,22 @@ def change_card(request):
 @require_POST
 @login_required
 def change_plan(request):
-    form = PlanForm(request.POST)
+    form_class = get_plan_form(request)
+    form = form_class(request.POST)
+    customer = request.customer
     try:
-        current_plan = request.user.customer.current_subscription.plan
+        current_plan = customer.current_subscription.plan
     except CurrentSubscription.DoesNotExist:
         current_plan = None
     if form.is_valid():
         try:
-            request.user.customer.subscribe(form.cleaned_data["plan"])
+            customer.subscribe(form.cleaned_data["plan"])
             data = {
-                "form": PlanForm(initial={"plan": form.cleaned_data["plan"]})
+                "form": form_class(initial={"plan": form.cleaned_data["plan"]})
             }
         except stripe.StripeError as e:
             data = {
-                "form": PlanForm(initial={"plan": current_plan}),
+                "form": form_class(initial={"plan": current_plan}),
                 "error": smart_str(e)
             }
     else:
@@ -121,15 +127,17 @@ def change_plan(request):
 
 @require_POST
 @login_required
-def subscribe(request, form_class=PlanForm):
+def subscribe(request):
+    form_class = get_plan_form(request)
     data = {"plans": settings.PAYMENTS_PLANS}
     form = form_class(request.POST)
     if form.is_valid():
+        client_id = request.client_id
+        customer = request.customer
         try:
-            try:
-                customer = request.user.customer
-            except ObjectDoesNotExist:
-                customer = Customer.create(request.user)
+            if customer is None:
+                client_id = settings.STRIPE_CLIENT_ID_FUNCTION(request)
+                customer = Customer.create(request.user, client_id=client_id)
             if request.POST.get("stripe_token"):
                 customer.update_card(request.POST.get("stripe_token"))
             customer.subscribe(form.cleaned_data["plan"])
@@ -147,8 +155,9 @@ def subscribe(request, form_class=PlanForm):
 @require_POST
 @login_required
 def cancel(request):
+    customer = request.customer
     try:
-        request.user.customer.cancel()
+        customer.cancel()
         data = {}
     except stripe.StripeError as e:
         data = {"error": smart_str(e)}
@@ -159,14 +168,17 @@ def cancel(request):
 @require_POST
 def webhook(request):
     data = json.loads(smart_str(request.body))
+    client_id = request.client_id
     if Event.objects.filter(stripe_id=data["id"]).exists():
         EventProcessingException.objects.create(
+            client_id=client_id,
             data=data,
             message="Duplicate event record",
             traceback=""
         )
     else:
         event = Event.objects.create(
+            client_id=client_id,
             stripe_id=data["id"],
             kind=data["type"],
             livemode=data["livemode"],

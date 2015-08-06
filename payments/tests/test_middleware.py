@@ -68,13 +68,13 @@ class ActiveSubscriptionMiddlewareTests(TestCase):
         self.assertIsNone(response)
 
     def test_authed_user_with_no_active_subscription_passes_with_exempt_url(self):
-        Customer.objects.create(stripe_id="cus_1", user=self.request.user)
+        Customer.objects.create(stripe_id="cus_1", user=self.request.user, client_id='corp')
         self.request.path = "/accounts/signup/"
         response = self.middleware.process_request(self.request)
         self.assertIsNone(response)
 
     def test_authed_user_with_no_active_subscription_redirects_on_non_exempt_url(self):
-        Customer.objects.create(stripe_id="cus_1", user=self.request.user)
+        Customer.objects.create(stripe_id="cus_1", user=self.request.user, client_id='corp')
         self.request.path = "/the/app/"
         response = self.middleware.process_request(self.request)
         self.assertEqual(response.status_code, 302)
@@ -86,7 +86,8 @@ class ActiveSubscriptionMiddlewareTests(TestCase):
     def test_authed_user_with_active_subscription_redirects_on_non_exempt_url(self):
         customer = Customer.objects.create(
             stripe_id="cus_1",
-            user=self.request.user
+            user=self.request.user,
+            client_id='corp',
         )
         CurrentSubscription.objects.create(
             customer=customer,

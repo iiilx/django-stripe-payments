@@ -20,7 +20,8 @@ DEFAULT_SETTINGS = dict(
     MIDDLEWARE_CLASSES=[
         "django.contrib.sessions.middleware.SessionMiddleware",
         "django.contrib.auth.middleware.AuthenticationMiddleware",
-        "django.contrib.messages.middleware.MessageMiddleware"
+        "django.contrib.messages.middleware.MessageMiddleware",
+        "payments.middleware.CustomerMiddleware"
     ],
     ROOT_URLCONF="payments.urls",
     INSTALLED_APPS=[
@@ -33,41 +34,48 @@ DEFAULT_SETTINGS = dict(
         "payments",
     ],
     SITE_ID=1,
-    STRIPE_PUBLIC_KEY="",
-    STRIPE_SECRET_KEY="",
+    STRIPE_CLIENT_ID_FUNCTION = lambda r: 'corp',
+    STRIPE_USER_MODEL='auth.User',
+    STRIPE_CLIENT_IDS = ('corp',),
+    STRIPE_PUBLIC_KEYS={'corp': ''},
+    STRIPE_SECRET_KEYS={'corp': ''},
+    PAYMENTS_INVOICE_FROM_EMAILS={'corp': 'billing@corp.com'},
+    PAYMENTS_DEFAULT_PLANS = {'corp': None},
     PAYMENTS_PLANS={
-        "free": {
-            "name": "Free Plan"
-        },
-        "entry": {
-            "stripe_plan_id": "entry-monthly",
-            "name": "Entry ($9.54/month)",
-            "description": "The entry-level monthly subscription",
-            "price": 9.54,
-            "interval": "month",
-            "currency": "usd"
-        },
-        "pro": {
-            "stripe_plan_id": "pro-monthly",
-            "name": "Pro ($19.99/month)",
-            "description": "The pro-level monthly subscription",
-            "price": 19.99,
-            "interval": "month",
-            "currency": "usd"
-        },
-        "premium": {
-            "stripe_plan_id": "premium-monthly",
-            "name": "Gold ($59.99/month)",
-            "description": "The premium-level monthly subscription",
-            "price": decimal.Decimal("59.99"),
-            "interval": "month",
-            "currency": "usd"
+        "corp": {
+            "free": {
+                "name": "Free Plan"
+            },
+            "entry": {
+                "stripe_plan_id": "entry-monthly",
+                "name": "Entry ($9.54/month)",
+                "description": "The entry-level monthly subscription",
+                "price": 9.54,
+                "interval": "month",
+                "currency": "usd"
+            },
+            "pro": {
+                "stripe_plan_id": "pro-monthly",
+                "name": "Pro ($19.99/month)",
+                "description": "The pro-level monthly subscription",
+                "price": 19.99,
+                "interval": "month",
+                "currency": "usd"
+            },
+            "premium": {
+                "stripe_plan_id": "premium-monthly",
+                "name": "Gold ($59.99/month)",
+                "description": "The premium-level monthly subscription",
+                "price": decimal.Decimal("59.99"),
+                "interval": "month",
+                "currency": "usd"
+            }
         }
     },
     SUBSCRIPTION_REQUIRED_EXCEPTION_URLS=["payments_subscribe"],
     SUBSCRIPTION_REQUIRED_REDIRECT="payments_subscribe",
-    PAYMENTS_TRIAL_PERIOD_FOR_USER_CALLBACK="payments.tests.callbacks.callback_demo",
-    PAYMENTS_PLAN_QUANTITY_CALLBACK="payments.tests.callbacks.quantity_call_back"
+    PAYMENTS_TRIAL_PERIOD_FOR_USER_CALLBACKS={"corp": "payments.tests.callbacks.callback_demo"},
+    PAYMENTS_PLAN_QUANTITY_CALLBACKS={"corp": "payments.tests.callbacks.quantity_call_back"}
 )
 
 

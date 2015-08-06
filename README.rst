@@ -2,7 +2,7 @@
 django-stripe-payments
 ======================
 
-a payments Django app for Stripe
+a MULTI-CLIENT payments Django app for Stripe
 
 .. image:: http://slack.pinaxproject.com/badge.svg
     :target: http://slack.pinaxproject.com/

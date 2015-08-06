@@ -19,13 +19,13 @@ from jsonfield.fields import JSONField
 
 from .managers import CustomerManager, ChargeManager, TransferManager
 from .settings import (
-    DEFAULT_PLAN,
-    INVOICE_FROM_EMAIL,
+    DEFAULT_PLANS,
+    INVOICE_FROM_EMAILS,
     PAYMENTS_PLANS,
     plan_from_stripe_id,
     SEND_EMAIL_RECEIPTS,
-    TRIAL_PERIOD_FOR_USER_CALLBACK,
-    PLAN_QUANTITY_CALLBACK
+    TRIAL_PERIOD_FOR_USER_CALLBACKS,
+    PLAN_QUANTITY_CALLBACKS
 )
 from .signals import (
     cancelled,
@@ -41,14 +41,24 @@ from .utils import (
 )
 
 
-stripe.api_key = settings.STRIPE_SECRET_KEY
+class APIKeyMixin(object):
+
+    @property
+    def api_key(self):
+        client_id = getattr(self, 'client_id', None)
+        if client_id is None and hasattr(self, 'customer'):
+            client_id = self.customer.client_id
+        return settings.STRIPE_SECRET_KEYS[client_id]
+
+
 stripe.api_version = getattr(settings, "STRIPE_API_VERSION", "2012-11-07")
 
 
-class StripeObject(models.Model):
+class StripeObject(APIKeyMixin, models.Model):
 
     stripe_id = models.CharField(max_length=255, unique=True)
     created_at = models.DateTimeField(default=timezone.now)
+    client_id = models.CharField(max_length=32, null=False)
 
     class Meta:  # pylint: disable=E0012,C1001
         abstract = True
@@ -61,14 +71,16 @@ class EventProcessingException(models.Model):
     message = models.CharField(max_length=500)
     traceback = models.TextField()
     created_at = models.DateTimeField(default=timezone.now)
+    client_id = models.CharField(max_length=32)
 
     @classmethod
-    def log(cls, data, exception, event):
+    def log(cls, data, exception, event, client_id):
         cls.objects.create(
             event=event,
             data=data or "",
             message=str(exception),
-            traceback=traceback.format_exc()
+            traceback=traceback.format_exc(),
+            client_id=client_id,
         )
 
     def __unicode__(self):
@@ -112,7 +124,7 @@ class Event(StripeObject):
                 pass
 
     def validate(self):
-        evt = stripe.Event.retrieve(self.stripe_id)
+        evt = stripe.Event.retrieve(self.stripe_id, api_key=self.api_key)
         self.validated_message = json.loads(
             json.dumps(
                 evt.to_dict(),
@@ -232,7 +244,7 @@ class Transfer(StripeObject):
     objects = TransferManager()
 
     def update_status(self):
-        self.status = stripe.Transfer.retrieve(self.stripe_id).status
+        self.status = stripe.Transfer.retrieve(self.stripe_id, api_key=self.api_key).status
         self.save()
 
     @classmethod
@@ -302,12 +314,13 @@ class TransferChargeFee(models.Model):
     description = models.TextField(null=True, blank=True)
     kind = models.CharField(max_length=150)
     created_at = models.DateTimeField(default=timezone.now)
+    client_id = models.CharField(max_length=32)
 
 
 class Customer(StripeObject):
 
-    user = models.OneToOneField(
-        getattr(settings, "AUTH_USER_MODEL", "auth.User"),
+    user = models.ForeignKey(
+        getattr(settings, "STRIPE_USER_MODEL", "auth.User"),
         null=True
     )
     card_fingerprint = models.CharField(max_length=200, blank=True)
@@ -322,7 +335,7 @@ class Customer(StripeObject):
 
     @property
     def stripe_customer(self):
-        return stripe.Customer.retrieve(self.stripe_id)
+        return stripe.Customer.retrieve(self.stripe_id, api_key=self.api_key)
 
     def purge(self):
         try:
@@ -373,18 +386,19 @@ class Customer(StripeObject):
         cancelled.send(sender=self, stripe_response=sub)
 
     @classmethod
-    def create(cls, user, card=None, plan=None, charge_immediately=True):
-
+    def create(cls, user, card=None, plan=None, charge_immediately=True,
+               client_id=None, api_key=None):
         if card and plan:
-            plan = PAYMENTS_PLANS[plan]["stripe_plan_id"]
-        elif DEFAULT_PLAN:
-            plan = PAYMENTS_PLANS[DEFAULT_PLAN]["stripe_plan_id"]
+            plans = PAYMENTS_PLANS[client_id]
+            plan = plans[plan]["stripe_plan_id"]
+        elif DEFAULT_PLANS.get(client_id):
+            plan = plans[DEFAULT_PLANS.get(client_id)]["stripe_plan_id"]
         else:
             plan = None
 
         trial_end = None
-        if TRIAL_PERIOD_FOR_USER_CALLBACK and plan:
-            trial_days = TRIAL_PERIOD_FOR_USER_CALLBACK(user)
+        if TRIAL_PERIOD_FOR_USER_CALLBACKS.get(client_id) and plan:
+            trial_days = TRIAL_PERIOD_FOR_USER_CALLBACKS.get(client_id)(user)
             trial_end = datetime.datetime.utcnow() + datetime.timedelta(
                 days=trial_days
             )
@@ -392,8 +406,9 @@ class Customer(StripeObject):
         stripe_customer = stripe.Customer.create(
             email=user.email,
             card=card,
-            plan=plan or DEFAULT_PLAN,
-            trial_end=trial_end
+            plan=plan,
+            trial_end=trial_end,
+            api_key=api_key
         )
 
         if stripe_customer.active_card:
@@ -402,12 +417,14 @@ class Customer(StripeObject):
                 stripe_id=stripe_customer.id,
                 card_fingerprint=stripe_customer.active_card.fingerprint,
                 card_last_4=stripe_customer.active_card.last4,
-                card_kind=stripe_customer.active_card.type
+                card_kind=stripe_customer.active_card.type,
+                client_id=client_id
             )
         else:
             cus = cls.objects.create(
                 user=user,
                 stripe_id=stripe_customer.id,
+                client_id=client_id
             )
 
         if plan:
@@ -444,7 +461,7 @@ class Customer(StripeObject):
 
     def send_invoice(self):
         try:
-            invoice = stripe.Invoice.create(customer=self.stripe_id)
+            invoice = stripe.Invoice.create(customer=self.stripe_id, api_key=self.api_key)
             if invoice.amount_due > 0:
                 invoice.pay()
             return True
@@ -546,8 +563,8 @@ class Customer(StripeObject):
     def subscribe(self, plan, quantity=None, trial_days=None,
                   charge_immediately=True, token=None, coupon=None):
         if quantity is None:
-            if PLAN_QUANTITY_CALLBACK is not None:
-                quantity = PLAN_QUANTITY_CALLBACK(self)
+            if PLAN_QUANTITY_CALLBACKS.get(self.client_id) is not None:
+                quantity = PLAN_QUANTITY_CALLBACKS.get(self.client_id)(self)
             else:
                 quantity = 1
         cu = self.stripe_customer
@@ -559,7 +576,7 @@ class Customer(StripeObject):
         if token:
             subscription_params["card"] = token
 
-        subscription_params["plan"] = PAYMENTS_PLANS[plan]["stripe_plan_id"]
+        subscription_params["plan"] = PAYMENTS_PLANS[self.client_id][plan]["stripe_plan_id"]
         subscription_params["quantity"] = quantity
         subscription_params["coupon"] = coupon
         resp = cu.update_subscription(**subscription_params)
@@ -592,6 +609,7 @@ class Customer(StripeObject):
             customer=self.stripe_id,
             description=description,
             capture=capture,
+            api_key=self.api_key,
         )
         obj = self.record_charge(resp["id"])
         if send_receipt:
@@ -599,7 +617,7 @@ class Customer(StripeObject):
         return obj
 
     def record_charge(self, charge_id):
-        data = stripe.Charge.retrieve(charge_id)
+        data = stripe.Charge.retrieve(charge_id, api_key=self.api_key)
         return Charge.sync_from_stripe_data(data)
 
 
@@ -629,6 +647,10 @@ class CurrentSubscription(models.Model):
     @property
     def total_amount(self):
         return self.amount * self.quantity
+
+    @property
+    def api_key(self):
+        return self.customer.api_key
 
     def plan_display(self):
         return PAYMENTS_PLANS[self.plan]["name"]
@@ -686,7 +708,7 @@ class Invoice(models.Model):
 
     def retry(self):
         if not self.paid and not self.closed:
-            inv = stripe.Invoice.retrieve(self.stripe_id)
+            inv = stripe.Invoice.retrieve(self.stripe_id, api_key=self.api_key)
             inv.pay()
             return True
         return False
@@ -695,6 +717,10 @@ class Invoice(models.Model):
         if self.paid:
             return "Paid"
         return "Open"
+
+    @property
+    def api_key(self):
+        return self.customer.api_key
 
     @classmethod
     def sync_from_stripe_data(cls, stripe_invoice, send_receipt=True):
@@ -779,11 +805,12 @@ class Invoice(models.Model):
         return invoice
 
     @classmethod
-    def handle_event(cls, event, send_receipt=SEND_EMAIL_RECEIPTS):
+    def handle_event(cls, event, send_receipt=SEND_EMAIL_RECEIPTS, api_key=None):
+        assert(api_key)
         valid_events = ["invoice.payment_failed", "invoice.payment_succeeded"]
         if event.kind in valid_events:
             invoice_data = event.message["data"]["object"]
-            stripe_invoice = stripe.Invoice.retrieve(invoice_data["id"])
+            stripe_invoice = stripe.Invoice.retrieve(invoice_data["id"], api_key=api_key)
             cls.sync_from_stripe_data(stripe_invoice, send_receipt=send_receipt)
 
 
@@ -804,6 +831,10 @@ class InvoiceItem(models.Model):
 
     def plan_display(self):
         return PAYMENTS_PLANS[self.plan]["name"]
+
+    @property
+    def api_key(self):
+        return self.invoice.api_key
 
 
 class Charge(StripeObject):
@@ -839,18 +870,22 @@ class Charge(StripeObject):
     def refund(self, amount=None):
         # pylint: disable=E1121
         charge_obj = stripe.Charge.retrieve(
-            self.stripe_id
+            self.stripe_id,
+            api_key=self.api_key,
         ).refund(
-            amount=convert_amount_for_api(self.calculate_refund_amount(amount=amount), self.currency)
+            amount=convert_amount_for_api(self.calculate_refund_amount(amount=amount), self.currency),
+            api_key=self.api_key
         )
         Charge.sync_from_stripe_data(charge_obj)
 
     def capture(self, amount=None):
         self.captured = True
         charge_obj = stripe.Charge.retrieve(
-            self.stripe_id
+            self.stripe_id,
+            api_key=self.api_key
         ).capture(
-            amount=convert_amount_for_api(self.calculate_refund_amount(amount=amount), self.currency)
+            amount=convert_amount_for_api(self.calculate_refund_amount(amount=amount), self.currency),
+            api_key=self.api_key
         )
         Charge.sync_from_stripe_data(charge_obj)
 
@@ -899,7 +934,7 @@ class Charge(StripeObject):
                 subject,
                 message,
                 to=[self.customer.user.email],
-                from_email=INVOICE_FROM_EMAIL
+                from_email=INVOICE_FROM_EMAILS[self.customer.client_id]
             ).send()
             self.receipt_sent = num_sent > 0
             self.save()

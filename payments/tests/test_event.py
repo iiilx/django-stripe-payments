@@ -16,7 +16,8 @@ class TestEventMethods(TestCase):
         self.user.save()
         self.customer = Customer.objects.create(
             stripe_id="cus_xxxxxxxxxxxxxxx",
-            user=self.user
+            user=self.user,
+            client_id='corp'
         )
 
     def test_link_customer_customer_created(self):
@@ -48,7 +49,8 @@ class TestEventMethods(TestCase):
             kind="customer.created",
             livemode=True,
             webhook_message=msg,
-            validated_message=msg
+            validated_message=msg,
+            client_id='corp'
         )
         event.link_customer()
         self.assertEquals(event.customer, self.customer)
@@ -103,7 +105,8 @@ class TestEventMethods(TestCase):
             kind="customer.updated",
             livemode=True,
             webhook_message=msg,
-            validated_message=msg
+            validated_message=msg,
+            client_id='corp'
         )
         event.link_customer()
         self.assertEquals(event.customer, self.customer)
@@ -137,7 +140,8 @@ class TestEventMethods(TestCase):
             kind="customer.deleted",
             livemode=True,
             webhook_message=msg,
-            validated_message=msg
+            validated_message=msg,
+            client_id='corp'
         )
         event.link_customer()
         self.assertEquals(event.customer, self.customer)
@@ -173,7 +177,8 @@ class TestEventMethods(TestCase):
             livemode=True,
             webhook_message=msg,
             validated_message=msg,
-            valid=True
+            valid=True,
+            client_id='corp'
         )
         event.process()
         self.assertEquals(event.customer, self.customer)
@@ -261,6 +266,7 @@ class TestEventMethods(TestCase):
             validated_message=msg,
             valid=True,
             customer=customer,
+            client_id='corp'
         )
 
         def signal_handler(sender, event, **kwargs):

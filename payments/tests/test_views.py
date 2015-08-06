@@ -19,7 +19,7 @@ from ..views import SubscribeView
 class PaymentsContextMixinTests(TestCase):
 
     def test_payments_context_mixin_get_context_data(self):
-        data = SubscribeView().get_context_data()
+        data = SubscribeView(request=None).get_context_data()
         self.assertTrue("STRIPE_PUBLIC_KEY" in data)
         self.assertTrue("PLAN_CHOICES" in data)
         self.assertTrue("PAYMENT_PLANS" in data)
@@ -28,7 +28,7 @@ class PaymentsContextMixinTests(TestCase):
 class SubscribeViewTests(TestCase):
 
     def test_payments_context_mixin_get_context_data(self):
-        data = SubscribeView().get_context_data()
+        data = SubscribeView(request=None).get_context_data()
         self.assertTrue("form" in data)
 
 
@@ -41,12 +41,13 @@ class AjaxViewsTests(TestCase):
             password=self.password
         )
         self.user.save()
-        customer = Customer.objects.create(
+        self.customer = Customer.objects.create(
             stripe_id="cus_1",
-            user=self.user
+            user=self.user,
+            client_id='corp',
         )
         CurrentSubscription.objects.create(
-            customer=customer,
+            customer=self.customer,
             plan="pro",
             quantity=1,
             start=timezone.now(),
@@ -90,8 +91,8 @@ class AjaxViewsTests(TestCase):
     @patch("payments.models.Customer.send_invoice")
     @patch("payments.models.Customer.retry_unpaid_invoices")
     def test_change_card_no_invoice(self, retry_mock, send_mock, update_mock):
-        self.user.customer.card_fingerprint = "XXXXXX"
-        self.user.customer.save()
+        self.customer.card_fingerprint = "XXXXXX"
+        self.customer.save()
         self.client.login(username=self.user.username, password=self.password)
         response = self.client.post(
             reverse("payments_ajax_change_card"),
@@ -116,7 +117,7 @@ class AjaxViewsTests(TestCase):
 
     @patch("payments.models.Customer.subscribe")
     def test_change_plan_no_subscription(self, subscribe_mock):
-        self.user.customer.current_subscription.delete()
+        self.customer.current_subscription.delete()
         self.client.login(username=self.user.username, password=self.password)
         response = self.client.post(
             reverse("payments_ajax_change_plan"),

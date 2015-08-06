@@ -20,7 +20,8 @@ class EmailReceiptTest(TestCase):
             stripe_id="cus_xxxxxxxxxxxxxxx",
             card_fingerprint="YYYYYYYY",
             card_last_4="2342",
-            card_kind="Visa"
+            card_kind="Visa",
+            client_id='corp'
         )
 
     @patch("stripe.Charge.retrieve")

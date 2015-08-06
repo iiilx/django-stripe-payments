@@ -14,12 +14,13 @@ class CommandTests(TestCase):
         User = get_user_model()
         self.user = User.objects.create_user(username="patrick")
 
-    @patch("stripe.Customer.retrieve")
-    @patch("stripe.Customer.create")
-    def test_init_customer_creates_customer(self, CreateMock, RetrieveMock):
-        CreateMock.return_value.id = "cus_XXXXX"
-        management.call_command("init_customers")
-        self.assertEquals(self.user.customer.stripe_id, "cus_XXXXX")
+    # dont need to create a customer object for every client/user combination...
+    # @patch("stripe.Customer.retrieve")
+    # @patch("stripe.Customer.create")
+    # def test_init_customer_creates_customer(self, CreateMock, RetrieveMock):
+    #     CreateMock.return_value.id = "cus_XXXXX"
+    #     management.call_command("init_customers")
+    #     self.assertEquals(self.user.customer.stripe_id, "cus_XXXXX")
 
     @patch("stripe.Plan.create")
     def test_plans_create(self, CreateMock):
@@ -45,8 +46,8 @@ class CommandTests(TestCase):
     def test_sync_customers(self, SyncChargesMock, SyncInvoicesMock, SyncSubscriptionMock, SyncMock, RetrieveMock):
         user2 = get_user_model().objects.create_user(username="thomas")
         get_user_model().objects.create_user(username="altman")
-        Customer.objects.create(stripe_id="cus_XXXXX", user=self.user)
-        Customer.objects.create(stripe_id="cus_YYYYY", user=user2)
+        Customer.objects.create(stripe_id="cus_XXXXX", user=self.user, client_id='corp')
+        Customer.objects.create(stripe_id="cus_YYYYY", user=user2, client_id='corp')
         management.call_command("sync_customers")
         self.assertEqual(SyncChargesMock.call_count, 2)
         self.assertEqual(SyncInvoicesMock.call_count, 2)

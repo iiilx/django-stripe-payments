@@ -55,13 +55,13 @@ class TestPlanFromStripeId(TestCase):
 class TrialPeriodCallbackSettingTest(TestCase):
 
     def setUp(self):
-        self.old_setting = settings.PAYMENTS_TRIAL_PERIOD_FOR_USER_CALLBACK
-        del settings.PAYMENTS_TRIAL_PERIOD_FOR_USER_CALLBACK
+        self.old_setting = settings.PAYMENTS_TRIAL_PERIOD_FOR_USER_CALLBACKS
+        del settings.PAYMENTS_TRIAL_PERIOD_FOR_USER_CALLBACKS
         six.moves.reload_module(app_settings)
 
     def tearDown(self):
-        settings.PAYMENTS_TRIAL_PERIOD_FOR_USER_CALLBACK = self.old_setting
+        settings.PAYMENTS_TRIAL_PERIOD_FOR_USER_CALLBACKS = self.old_setting
 
-    def test_callback_is_none_when_not_set(self):
-        from ..settings import TRIAL_PERIOD_FOR_USER_CALLBACK
-        self.assertIsNone(TRIAL_PERIOD_FOR_USER_CALLBACK)
+    def test_callback_is_false_when_not_set(self):
+        from ..settings import TRIAL_PERIOD_FOR_USER_CALLBACKS
+        self.assertFalse(bool(TRIAL_PERIOD_FOR_USER_CALLBACKS))
